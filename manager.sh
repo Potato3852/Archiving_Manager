@@ -64,7 +64,10 @@ fi
 echo "Files to archive:"
 echo "${OLDEST_FILES[@]}"
 
-mkdir -p "$BACKUP"
+if [ ! -d "$BACKUP" ]; then
+    echo "Creating directory for <backup>"
+    mkdir -p "$BACKUP"
+
 if [ ! -w "$BACKUP" ]; then
     echo "Error: No write permission for backup directory '$BACKUP'"
     exit 1
