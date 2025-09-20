@@ -1,3 +1,4 @@
+ cat manager.sh 
 #!/bin/bash
 
 # Проверка количества аргументов
@@ -67,6 +68,7 @@ echo "${OLDEST_FILES[@]}"
 if [ ! -d "$BACKUP" ]; then
     echo "Creating directory for <backup>"
     mkdir -p "$BACKUP"
+fi
 
 if [ ! -w "$BACKUP" ]; then
     echo "Error: No write permission for backup directory '$BACKUP'"
@@ -80,7 +82,7 @@ echo "Creating archives $ARCHIVE_NAME"
 tar -czf "$ARCHIVE_NAME" "${OLDEST_FILES[@]}"
 
 echo "Removing old files..."
-rm -rf "${OLDEST_FILES[@]}
+rm -rf "${OLDEST_FILES[@]}"
 
 NEW_SIZE_MB=$(du -sm . | cut -f1)
 NEW_PERCENTAGE=$((NEW_SIZE_MB * 100 / LIMIT))
