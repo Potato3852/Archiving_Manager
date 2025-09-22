@@ -2,14 +2,15 @@
 #!/bin/bash
 
 # Проверка количества аргументов
-if [ $# -ne 3 ]; then
-    echo "Error: give 3 args in format <directory> <limit in MB> <numbers of zip files>"
+if [ $# -ne 4 ]; then
+    echo "Error: give 4 args in format <directory> <limit in MB> <percentage threshold> <numbers of zip files>"
     exit 1
 fi
 
 DIRECTORY="$1"
 LIMIT="$2"
-M="$3"
+N="$3"
+M="$4"
 BACKUP="backup"
 
 # Проверка существования директории
@@ -46,7 +47,7 @@ echo "Directory size: ${SIZE_MB}MB"
 PERCENTAGE=$((SIZE_MB * 100 / LIMIT))
 echo "CURRENT percentage: ${PERCENTAGE} of limit"
 
-if [ $PERCENTAGE -le 100 ]; then
+if [ $PERCENTAGE -le $((100 + N)) ]; then
     echo " Within threshold limits, no archiving needed"
     exit 0
 fi
