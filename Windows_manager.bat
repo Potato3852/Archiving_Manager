@@ -7,13 +7,13 @@ param(
 
 $BACKUP = "backup"
 
-# Проверка количества аргументов
+# Checking numbers of arguments 
 if ($args.Count -ne 3) {
     Write-Error "Error: give 3 args in format <directory> <limit in MB> <numbers of zip files>"
     exit 1
 }
 
-# Проверка существования директории
+# Cheking directory existance
 if (-not (Test-Path $Directory -PathType Container)) {
     Write-Error "Error: Directory '$Directory' does not exist"
     exit 1
@@ -29,7 +29,7 @@ if ($Limit -eq 0) {
     exit 1
 }
 
-# Проверка прав доступа
+# cheking rules of status
 try {
     $testFile = Join-Path $Directory "test_write_access.tmp"
     [IO.File]::WriteAllText($testFile, "test")
@@ -42,7 +42,7 @@ catch {
 
 Set-Location $Directory
 
-# Посчитаем и выведем размер директории в процентах от порога
+# SIZE of dir and percentage
 $SizeMB = [math]::Round((Get-ChildItem -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
 Write-Host "Directory size: ${SizeMB}MB"
 
@@ -54,7 +54,7 @@ if ($Percentage -le 100) {
     exit 0
 }
 
-# Найдем M самых старых файлов в директории
+# Find the M oldest files
 $OldestFiles = Get-ChildItem -File | Sort-Object LastWriteTime | Select-Object -First $M
 
 if ($OldestFiles.Count -eq 0) {

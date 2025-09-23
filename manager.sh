@@ -1,7 +1,7 @@
  cat manager.sh 
 #!/bin/bash
 
-# Проверка количества аргументов
+# Checking numbers of arguments
 if [ $# -ne 4 ]; then
     echo "Error: give 4 args in format <directory> <limit in MB> <percentage threshold> <numbers of zip files>"
     exit 1
@@ -13,7 +13,7 @@ N="$3"
 M="$4"
 BACKUP="backup"
 
-# Проверка существования директории
+# Cheking directory existance
 if [ ! -d "$DIRECTORY" ]; then
     echo "Error: Directory '$DIRECTORY' does not exist"
     exit 1
@@ -29,7 +29,7 @@ if [ "$LIMIT" -eq 0 ]; then
     exit 1
 fi
 
-# Проверка прав доступа
+# Cheling rules of status
 if [ ! -w "$DIRECTORY" ]; then
     echo "Error: No write permission for directory '$DIRECTORY'"
     exit 1
@@ -40,7 +40,7 @@ cd "$DIRECTORY" || {
     exit 1
 }
 
-# Посчитаем и выведем размер директории в процентах от порога
+# SIZE of dir and percentage
 SIZE_MB=$(du -sm . | cut -f1)
 echo "Directory size: ${SIZE_MB}MB"
 
@@ -52,7 +52,7 @@ if [ $PERCENTAGE -le $((100 + N)) ]; then
     exit 0
 fi
 
-# Найдем M самых старых файлов в директории
+# Find the M oldest files
 OLDEST_FILES=()
 while IFS= read -r -d '' file; do
     OLDEST_FILES+=("$file")
