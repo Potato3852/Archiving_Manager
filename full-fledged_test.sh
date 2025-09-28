@@ -1,46 +1,40 @@
 #!/bin/bash
 
-# Цвета для вывода
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
 TEST_COUNT=0
 PASSED_COUNT=0
 FAILED_COUNT=0
 
 echo_test() {
-    echo -e "${YELLOW}TEST: $1${NC}"
+    echo "TEST: $1"
     ((TEST_COUNT++))
 }
 
 echo_pass() {
-    echo -e "${GREEN}PASS: $1${NC}"
+    echo "PASS: $1"
     ((PASSED_COUNT++))
 }
 
 echo_fail() {
-    echo -e "${RED}FAIL: $1${NC}"
+    echo "FAIL: $1"
     ((FAILED_COUNT++))
 }
 
-# Тест 1: Проверка использования (без аргументов)
-echo_test "Testing error message (no arguments)"
+# Test 1: Check arguments
+echo_test "Testing error message (wrong number of arguments)"
 output=$(bash manager.sh 2>&1)
-if echo "$output" | grep -q "Error: give 4 args"; then
+if echo "$output" | grep -q "Error: give 3 args"; then
     echo_pass "Error message displayed correctly"
 else
     echo_fail "Error message not displayed. Got: $output"
 fi
 
-# Тест 2: Создание тестовой среды
+# Test 2: Create test environment
 echo_test "Creating test environment"
 TEST_DIR=$(mktemp -d)
 LOG_DIR="$TEST_DIR/test_logs"
 mkdir -p "$LOG_DIR"
 
-# Создаем тестовые файлы с разными датами
+# Create test files with different dates
 for i in {1..5}; do
     touch -d "$i days ago" "$LOG_DIR/file$i.log"
     echo "This is test file $i" > "$LOG_DIR/file$i.log"
@@ -52,32 +46,31 @@ else
     echo_fail "Failed to create test environment"
 fi
 
-# Тест 3: Запуск скрипта с превышением лимита более чем на N%
+# Test 3: Run script with exceeded limit (should trigger archiving)
 echo_test "Running script with exceeded limit (should trigger archiving)"
-# Создаем файлы так, чтобы размер превысил лимит более чем на N%
+# Create files to exceed limit by more than N%
 dd if=/dev/zero of="$LOG_DIR/large_file1.log" bs=1M count=2 2>/dev/null
 dd if=/dev/zero of="$LOG_DIR/large_file2.log" bs=1M count=2 2>/dev/null
 
-# Лимит 1MB, текущий размер ~4MB + файлы = превышение более чем на 15%
-output=$(bash manager.sh "$LOG_DIR" 1 15 2 2>&1)
+# Limit 1MB, current size ~4MB = exceeds more than 15%
+output=$(bash manager.sh "$LOG_DIR" 1 15 2>&1)
 
-# Проверяем, что архив создан
+# Check if archive created and hard limit applied
 if [ -d "$LOG_DIR/backup" ] && [ $(find "$LOG_DIR/backup" -name "*.tar.gz" | wc -l) -gt 0 ]; then
     echo_pass "Archive created successfully"
 else
     echo_fail "Archive not created. Output: $output"
 fi
 
-# Тест 4: Запуск скрипта в пределах лимита + N%
+# Test 4: Run script within limit + threshold (should not trigger archiving)
 echo_test "Running script within limit + threshold (should not trigger archiving)"
-# Создаем чистую директорию для этого теста
 CLEAN_DIR=$(mktemp -d)
 mkdir -p "$CLEAN_DIR/logs"
 touch "$CLEAN_DIR/logs/file1.log"
 echo "small file" > "$CLEAN_DIR/logs/file1.log"
 
-# Лимит 100MB, текущий размер ~0MB, N=15% - не должно архивировать
-output=$(bash manager.sh "$CLEAN_DIR/logs" 100 15 2 2>&1)
+# Limit 100MB, current size ~0MB, N=15% - should not archive
+output=$(bash manager.sh "$CLEAN_DIR/logs" 100 15 2>&1)
 
 if echo "$output" | grep -q "Within threshold limits"; then
     echo_pass "Script correctly identified usage within limits"
@@ -87,14 +80,14 @@ fi
 
 rm -rf "$CLEAN_DIR"
 
-# Тест 5: Проверка превышения ровно на порог (не должно архивировать)
+# Test 5: Check exact threshold (should not archive)
 echo_test "Testing exact threshold (should not archive)"
 THRESH_DIR=$(mktemp -d)
 mkdir -p "$THRESH_DIR/logs"
-# Создаем размер примерно 115MB при лимите 100MB и N=15 (ровно порог)
+# Create size ~115MB with limit 100MB and N=15 (exact threshold)
 dd if=/dev/zero of="$THRESH_DIR/logs/file1.log" bs=1M count=115 2>/dev/null
 
-output=$(bash manager.sh "$THRESH_DIR/logs" 100 15 2 2>&1)
+output=$(bash manager.sh "$THRESH_DIR/logs" 100 15 2>&1)
 
 if echo "$output" | grep -q "Within threshold limits"; then
     echo_pass "Script correctly handled exact threshold"
@@ -104,9 +97,9 @@ fi
 
 rm -rf "$THRESH_DIR"
 
-# Тест 6: Проверка обработки несуществующей директории
+# Test 6: Check non-existent directory handling
 echo_test "Testing non-existent directory handling"
-output=$(bash manager.sh "/invalid/path/that/doesnt/exist" 10 15 2 2>&1)
+output=$(bash manager.sh "/invalid/path/that/doesnt/exist" 10 15 2>&1)
 
 if echo "$output" | grep -q "Error: Directory"; then
     echo_pass "Script correctly handled non-existent directory"
@@ -114,20 +107,39 @@ else
     echo_fail "Script did not handle non-existent directory correctly. Output: $output"
 fi
 
-# Очистка
+# Test 7: Check hard limit application
+echo_test "Testing hard limit application"
+LIMIT_DIR=$(mktemp -d)
+mkdir -p "$LIMIT_DIR/logs"
+dd if=/dev/zero of="$LIMIT_DIR/logs/test_file.log" bs=1M count=50 2>/dev/null
+
+# Apply 100MB limit
+bash manager.sh "$LIMIT_DIR/logs" 100 10 2>&1 > /dev/null
+
+# Try to write file larger than limit
+dd if=/dev/zero of="$LIMIT_DIR/logs/large_file.log" bs=1M count=150 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo_pass "Hard limit working correctly"
+else
+    echo_fail "Hard limit not working"
+fi
+
+rm -rf "$LIMIT_DIR"
+
+# Cleanup
 rm -rf "$TEST_DIR"
 
-# Итоги
+# Results
 echo
 echo "=== TEST RESULTS ==="
 echo "Total tests: $TEST_COUNT"
-echo -e "${GREEN}Passed: $PASSED_COUNT${NC}"
-echo -e "${RED}Failed: $FAILED_COUNT${NC}"
+echo "Passed: $PASSED_COUNT"
+echo "Failed: $FAILED_COUNT"
 
 if [ $FAILED_COUNT -eq 0 ]; then
-    echo -e "${GREEN}All tests passed! 🎉${NC}"
+    echo "All tests passed!"
     exit 0
 else
-    echo -e "${RED}Some tests failed! ❌${NC}"
+    echo "Some tests failed!"
     exit 1
 fi
