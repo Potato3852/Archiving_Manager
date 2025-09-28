@@ -9,7 +9,7 @@ This project provides two scripts that monitor directory size and automatically 
 
 - **Linux version**: `manager.sh` (bash script)
 - **Windows version**: `Windows_manager.bat` (batch script)
-- **Remove_new_rules**: `remove_limit.sh` (bash script) it will help you to remove the current folder size limit. it only works on linux!!! (be careful with the `Windows_manager.bat`
+- **Remove_new_rules**: `remove_limit.sh` (bash script) it will help you to remove the current folder size limit. it only works on linux!!! (be careful with the `Windows_manager.bat`)
 
 ## For Beginners (No Git Experience)
 
