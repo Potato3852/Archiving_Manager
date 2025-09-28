@@ -3,6 +3,8 @@ A cross-platform solution for automatic directory archiving when storage limits 
 Contains both Linux bash script and Windows batch script versions.
 ## Overview
 
+!!!test.sh is not working now. Please wait for the update!!!
+
 This project provides two scripts that monitor directory size and automatically archive the oldest files when a specified storage limit is exceeded:
 
 - **Linux version**: `manager.sh` (bash script)
