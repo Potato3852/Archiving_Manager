@@ -44,3 +44,9 @@ This project provides two scripts that monitor directory size and automatically 
    ```bash
    git clone https://github.com/Potato3852/Archiving_Manager.git
    cd Archiving_Manager
+
+4. **Using**:
+   ```bash
+   ./manager.sh <limit> <N percentages>
+   or
+   ./manager.sh -i
