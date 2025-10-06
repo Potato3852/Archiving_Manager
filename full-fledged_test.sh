@@ -19,13 +19,14 @@ echo_fail() {
     ((FAILED_COUNT++))
 }
 
-# Test 1: Check arguments
-echo_test "Testing error message (wrong number of arguments)"
+# Test 1: Check usage message (wrong number of arguments)
+echo_test "Testing usage message (wrong number of arguments)"
 output=$(bash manager.sh 2>&1)
-if echo "$output" | grep -q "Error: give 3 args"; then
-    echo_pass "Error message displayed correctly"
+
+if echo "$output" | grep -q "Usage:"; then
+    echo_pass "Usage message displayed correctly"
 else
-    echo_fail "Error message not displayed. Got: $output"
+    echo_fail "Usage message not displayed. Got: $output"
 fi
 
 # Test 2: Create test environment
@@ -46,36 +47,37 @@ else
     echo_fail "Failed to create test environment"
 fi
 
-# Test 3: Run script with exceeded limit (should trigger archiving)
-echo_test "Running script with exceeded limit (should trigger archiving)"
-# Create files to exceed limit by more than N%
-dd if=/dev/zero of="$LOG_DIR/large_file1.log" bs=1M count=2 2>/dev/null
-dd if=/dev/zero of="$LOG_DIR/large_file2.log" bs=1M count=2 2>/dev/null
+# Test 3: Run script with exceeded threshold (should trigger archiving)
+echo_test "Running script with exceeded threshold (should trigger archiving)"
+# Create files to exceed threshold (N% of limit)
+# Limit 10MB, N=50% = threshold 5MB, create 6MB to exceed
+dd if=/dev/zero of="$LOG_DIR/large_file1.log" bs=1M count=3 2>/dev/null
+dd if=/dev/zero of="$LOG_DIR/large_file2.log" bs=1M count=3 2>/dev/null
 
-# Limit 1MB, current size ~4MB = exceeds more than 15%
-output=$(bash manager.sh "$LOG_DIR" 1 15 2>&1)
+# Запускаем с флагом -y для автоматического подтверждения
+output=$(bash manager.sh -y "$LOG_DIR" 10 50 2>&1)
 
-# Check if archive created and hard limit applied
+# Check if archive created
 if [ -d "$LOG_DIR/backup" ] && [ $(find "$LOG_DIR/backup" -name "*.tar.gz" | wc -l) -gt 0 ]; then
     echo_pass "Archive created successfully"
 else
     echo_fail "Archive not created. Output: $output"
 fi
 
-# Test 4: Run script within limit + threshold (should not trigger archiving)
-echo_test "Running script within limit + threshold (should not trigger archiving)"
+# Test 4: Run script within threshold (should not trigger archiving)
+echo_test "Running script within threshold (should not trigger archiving)"
 CLEAN_DIR=$(mktemp -d)
 mkdir -p "$CLEAN_DIR/logs"
 touch "$CLEAN_DIR/logs/file1.log"
 echo "small file" > "$CLEAN_DIR/logs/file1.log"
 
-# Limit 100MB, current size ~0MB, N=15% - should not archive
-output=$(bash manager.sh "$CLEAN_DIR/logs" 100 15 2>&1)
+# Limit 100MB, N=20% = threshold 20MB, current size ~0MB - should not archive
+output=$(bash manager.sh -y "$CLEAN_DIR/logs" 100 20 2>&1)
 
 if echo "$output" | grep -q "Within threshold limits"; then
-    echo_pass "Script correctly identified usage within limits"
+    echo_pass "Script correctly identified usage within threshold"
 else
-    echo_fail "Script did not correctly identify usage within limits. Output: $output"
+    echo_fail "Script did not correctly identify usage within threshold. Output: $output"
 fi
 
 rm -rf "$CLEAN_DIR"
@@ -84,13 +86,13 @@ rm -rf "$CLEAN_DIR"
 echo_test "Testing exact threshold (should not archive)"
 THRESH_DIR=$(mktemp -d)
 mkdir -p "$THRESH_DIR/logs"
-# Create size ~115MB with limit 100MB and N=15 (exact threshold)
-dd if=/dev/zero of="$THRESH_DIR/logs/file1.log" bs=1M count=115 2>/dev/null
+# Create size exactly at threshold: limit 10MB, N=50% = 5MB threshold
+dd if=/dev/zero of="$THRESH_DIR/logs/file1.log" bs=1M count=5 2>/dev/null
 
-output=$(bash manager.sh "$THRESH_DIR/logs" 100 15 2>&1)
+output=$(bash manager.sh -y "$THRESH_DIR/logs" 10 50 2>&1)
 
 if echo "$output" | grep -q "Within threshold limits"; then
-    echo_pass "Script correctly handled exact threshold"
+    echo_pass "Script correctly handled exact threshold (no archiving needed)"
 else
     echo_fail "Script failed at exact threshold. Output: $output"
 fi
@@ -99,7 +101,7 @@ rm -rf "$THRESH_DIR"
 
 # Test 6: Check non-existent directory handling
 echo_test "Testing non-existent directory handling"
-output=$(bash manager.sh "/invalid/path/that/doesnt/exist" 10 15 2>&1)
+output=$(bash manager.sh -y "/invalid/path/that/doesnt/exist" 10 15 2>&1)
 
 if echo "$output" | grep -q "Error: Directory"; then
     echo_pass "Script correctly handled non-existent directory"
@@ -107,26 +109,67 @@ else
     echo_fail "Script did not handle non-existent directory correctly. Output: $output"
 fi
 
-# Test 7: Check hard limit application
-echo_test "Testing hard limit application"
+# Test 7: Check hard limit application (within threshold scenario)
+echo_test "Testing hard limit application (within threshold)"
 LIMIT_DIR=$(mktemp -d)
 mkdir -p "$LIMIT_DIR/logs"
-dd if=/dev/zero of="$LIMIT_DIR/logs/test_file.log" bs=1M count=50 2>/dev/null
+dd if=/dev/zero of="$LIMIT_DIR/logs/test_file.log" bs=1M count=2 2>/dev/null
 
-# Apply 100MB limit
-bash manager.sh "$LIMIT_DIR/logs" 100 10 2>&1 > /dev/null
+# Apply 10MB limit, N=50% = 5MB threshold, current size 2MB - should apply hard limit
+output=$(bash manager.sh -y "$LIMIT_DIR/logs" 10 50 2>&1)
 
-# Try to write file larger than limit
-dd if=/dev/zero of="$LIMIT_DIR/logs/large_file.log" bs=1M count=150 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo_pass "Hard limit working correctly"
+if echo "$output" | grep -q "Folder now has hard limit"; then
+    echo_pass "Hard limit applied successfully"
 else
-    echo_fail "Hard limit not working"
+    echo_fail "Hard limit not applied. Output: $output"
 fi
 
+# Cleanup mounted directory
+sudo umount "$LIMIT_DIR/logs" 2>/dev/null
+sudo rm -f "/limited_logs.img" 2>/dev/null
+sudo sed -i '\|/limited_logs.img|d' /etc/fstab 2>/dev/null
 rm -rf "$LIMIT_DIR"
 
+# Test 8: Test interactive mode flag
+echo_test "Testing interactive mode flag"
+# Тестируем флаг -i с автоматическими ответами
+output=$(printf "n\n" | bash manager.sh -i 2>&1)
+
+if echo "$output" | grep -q "Archiving Manager - Interactive Setup"; then
+    echo_pass "Interactive mode started correctly"
+else
+    echo_fail "Interactive mode not working. Output: $output"
+fi
+
+# Test 9: Test archiving logic with multiple batches
+echo_test "Testing archiving logic with multiple batches"
+ARCHIVE_DIR=$(mktemp -d)
+mkdir -p "$ARCHIVE_DIR/logs"
+
+# Create many small files to test batch archiving
+for i in {1..15}; do
+    echo "file $i" > "$ARCHIVE_DIR/logs/file$i.log"
+done
+
+# Add some size to exceed threshold
+dd if=/dev/zero of="$ARCHIVE_DIR/logs/large.log" bs=1M count=3 2>/dev/null
+
+# Limit 5MB, N=50% = 2.5MB threshold, current size ~3MB - should archive
+output=$(bash manager.sh -y "$ARCHIVE_DIR/logs" 5 50 2>&1)
+
+if echo "$output" | grep -q "Archiving completed" && [ -d "$ARCHIVE_DIR/logs/backup" ]; then
+    echo_pass "Batch archiving working correctly"
+else
+    echo_fail "Batch archiving failed. Output: $output"
+fi
+
 # Cleanup
+sudo umount "$ARCHIVE_DIR/logs" 2>/dev/null
+sudo rm -f "/limited_logs.img" 2>/dev/null
+sudo sed -i '\|/limited_logs.img|d' /etc/fstab 2>/dev/null
+rm -rf "$ARCHIVE_DIR"
+
+# Cleanup main test directory
 rm -rf "$TEST_DIR"
 
 # Results

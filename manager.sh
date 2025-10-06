@@ -1,7 +1,30 @@
 #!/bin/bash
 
+AUTO_YES=0
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -i|--interactive)
+            INTERACTIVE=1
+            shift
+            ;;
+        -y|--assume-yes)
+            AUTO_YES=1
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 #Some_functions-----
 answer(){
+    if [ $AUTO_YES -eq 1 ]; then
+        echo "$1 [Y/n]: y (auto-confirmed)"
+        return 0
+    fi
+
     local message="$1"
     read -p "$message [Y/n]: " choice
     [[ -z "$choice" || "$choice" =~ ^[Yy]$ ]]
@@ -20,6 +43,7 @@ show_usage(){
     echo "=== Archiving manager ==="
     echo "Usage: $0 <directory> <limit in MB> <percentage threshold>"
     echo "Or: $0 -i (interactive mode)"
+    echo "Or: $0 -y (auto confirm all prompts)"
     echo ""
     echo "Example: $0 /var/log 100 20"
 }
@@ -76,21 +100,18 @@ setup_interactive() {
 }
 
 # Checking arguments
-
-if [ "$1" = "-i" ] || [ "$1" = "--interactive" ]; then
+if [ $INTERACTIVE -eq 1 ]; then
     setup_interactive
 elif [ $# -eq 3 ]; then
     DIRECTORY="$1"
     LIMIT="$2"
     N="$3"
+elif [ $# -eq 0 ]; then
+    show_usage
+    exit 1
 else
     show_usage
-    echo ""
-    if answer "Would you like to use interactive mode?"; then
-        setup_interactive
-    else
-        exit 1
-    fi
+    exit 1
 fi
 
 BACKUP="backup"
@@ -209,7 +230,7 @@ if answer "Start archiving old files?"; then
             break
         fi
 
-	if [ ! -f "$OLDEST_FILE" ]; then
+        if [ ! -f "$OLDEST_FILE" ]; then
             continue
         fi
         
