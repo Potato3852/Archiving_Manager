@@ -18,6 +18,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+to_megabytes() {
+    local value=$1
+
+    value=$(echo "$value" | tr -d ' ')
+    
+    local num=$(echo "$value" | grep -oE '^[0-9]+(\.[0-9]+)?')
+    local unit=$(echo "$value" | grep -oE '[a-zA-Z]+$' | tr '[:upper:]' '[:lower:]')
+    
+    case $unit in 
+        "k"|"kb") echo "$num / 1024" | bc -l ;;
+        "m"|"mb") echo "$num" ;;
+        "g"|"gb") echo "$num * 1024" | bc -l ;;
+        "t"|"tb") echo "$num * 1024 * 1024" | bc -l ;;
+        *) echo "$num" ;; 
+    esac
+}
+
 #Some_functions-----
 answer(){
     if [ $AUTO_YES -eq 1 ]; then
@@ -41,11 +58,12 @@ get_input() {
 
 show_usage(){
     echo "=== Archiving manager ==="
-    echo "Usage: $0 <directory> <limit in MB> <percentage threshold>"
+    echo "Usage: $0 <directory> <limit> <percentage threshold>"
+    echo "Limit can be in KB, MB, GB, TB (e.g., 1G, 500M, 2.5GB)"
     echo "Or: $0 -i (interactive mode)"
     echo "Or: $0 -y (auto confirm all prompts)"
     echo ""
-    echo "Example: $0 /var/log 100 20"
+    echo "Example: $0 /var/log 1G 20"
 }
 
 setup_interactive() {
@@ -65,30 +83,31 @@ setup_interactive() {
     done
 
     while true; do
-        LIMIT=$(get_input "Enter size limit in MB" "100")
-        if [[ "$LIMIT" =~ ^[0-9]+$ ]] && [ "$LIMIT" -gt 0 ]; then
+        LIMIT_INPUT=$(get_input "Enter size limit (e.g., 1G, 500M, 2.5GB)" "1G")
+        LIMIT_MB=$(to_megabytes "$LIMIT_INPUT")
+        LIMIT_MB=${LIMIT_MB%.*}
+        
+        if [[ "$LIMIT_MB" =~ ^[0-9]+$ ]]; then
             break
-        else
-            echo "Error: Limit must be a positive number"
         fi
     done
 
     # Get threshold
     while true; do
         N=$(get_input "Enter percentage threshold for archiving" "20")
-        if [[ "$N" =~ ^[0-9]+$ ]]; then
+        if [[ "$N" =~ ^[0-9]+$ ]] && [ "$N" -le 100 ]; then
             break
         else
-            echo "Error: Threshold must be a number"
+            echo "Error: Threshold must be a number between 0-100"
         fi
     done
 
     echo ""
     echo "=== Configuration Summary ==="
     echo "Directory: $DIRECTORY"
-    echo "Size limit: ${LIMIT}MB"
+    echo "Size limit: ${LIMIT_INPUT} (${LIMIT_MB}MB)"
     echo "Archive threshold: ${N}% of limit"
-    echo "Archive trigger: $((LIMIT * N / 100))MB"
+    echo "Archive trigger: $((LIMIT_MB * N / 100))MB"
     echo ""
 
     if answer "Proceed with this configuration?"; then
@@ -104,8 +123,13 @@ if [ $INTERACTIVE -eq 1 ]; then
     setup_interactive
 elif [ $# -eq 3 ]; then
     DIRECTORY="$1"
-    LIMIT="$2"
+    LIMIT_INPUT="$2"
     N="$3"
+    
+    # Convert limit to MB
+    LIMIT_MB=$(to_megabytes "$LIMIT_INPUT")
+    LIMIT_MB=${LIMIT_MB%.*}
+    
 elif [ $# -eq 0 ]; then
     show_usage
     exit 1
@@ -124,11 +148,6 @@ if [ ! -d "$FULL_DIRECTORY" ]; then
     exit 1
 fi
 
-if [ "$LIMIT" -eq 0 ]; then
-    echo "Error: Limit cannot be zero"
-    exit 1
-fi
-
 # Checking write permissions
 if [ ! -w "$FULL_DIRECTORY" ]; then
     echo "Error: No write permission for directory '$FULL_DIRECTORY'"
@@ -137,18 +156,19 @@ fi
 
 # SIZE
 SIZE_MB=$(du -sm "$FULL_DIRECTORY" 2>/dev/null | tail -1 | cut -f1)
-ARCHIVE_TRIGGER=$((LIMIT * N / 100))
+ARCHIVE_TRIGGER=$((LIMIT_MB * N / 100))
 echo "Directory size: ${SIZE_MB}MB"
+echo "Limit: ${LIMIT_MB}MB"
 echo "Archive trigger: ${ARCHIVE_TRIGGER}MB"
 
-PERCENTAGE=$((SIZE_MB * 100 / LIMIT))
+PERCENTAGE=$((SIZE_MB * 100 / LIMIT_MB))
 echo "CURRENT percentage: ${PERCENTAGE}% of limit"
 
-#First scenary ------------------------------------------------------------
+#First scenario ------------------------------------------------------------
 if [ $SIZE_MB -le $ARCHIVE_TRIGGER ]; then
-    echo " Within threshold limits, no archiving needed"
+    echo "Within threshold limits, no archiving needed"
     
-    if answer "Apply hard folder size restriction of ${LIMIT}MB?"; then
+    if answer "Apply hard folder size restriction of ${LIMIT_INPUT}?"; then
         echo "Applying folder size restriction to prevent exceeding limit..."
 
         LOOP_FILE="/limited_${DIRECTORY##*/}.img"
@@ -168,7 +188,7 @@ if [ $SIZE_MB -le $ARCHIVE_TRIGGER ]; then
         fi
         
         # Create loop device with exact size limit
-        sudo dd if=/dev/zero of="$LOOP_FILE" bs=1M count=$LIMIT 2>/dev/null
+        sudo dd if=/dev/zero of="$LOOP_FILE" bs=1M count=$LIMIT_MB 2>/dev/null
         sudo mkfs.ext4 -q "$LOOP_FILE"
        
         TEMP_BACKUP=$(mktemp -d)
@@ -187,7 +207,7 @@ if [ $SIZE_MB -le $ARCHIVE_TRIGGER ]; then
             echo "$LOOP_FILE $FULL_DIRECTORY ext4 loop,defaults 0 0" | sudo tee -a /etc/fstab
         fi
         
-        echo "Folder now has hard limit of ${LIMIT}MB"
+        echo "Folder now has hard limit of ${LIMIT_INPUT}"
     else
         echo "Operation cancelled."
     fi
@@ -195,99 +215,132 @@ if [ $SIZE_MB -le $ARCHIVE_TRIGGER ]; then
 fi
 #------------------------------------------------------------------------
 
-# Second scenario - need archiving
+# Second scenario - need archiving (новая логика)
 echo "Size exceeds threshold, archiving required"
 
 if answer "Start archiving old files?"; then
     # Create backup directory if it doesn't exist
-    BACKUP_DIR="$FULL_DIRECTORY/$BACKUP"
-    if [ ! -d "$BACKUP_DIR" ]; then
-        echo "Creating directory for <backup>"
-        mkdir -p "$BACKUP_DIR"
-    fi
+    BACKUP_DIR="${FULL_DIRECTORY}/backup"
+    mkdir -p "$BACKUP_DIR"
 
     if [ ! -w "$BACKUP_DIR" ]; then
         echo "Error: No write permission for backup directory '$BACKUP_DIR'"
         exit 1
     fi
 
-    # Second scenario ------------------------------------------------------
-    ARCHIVED_COUNT=0
-    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    ARCHIVE_NAME="$BACKUP_DIR/logs_backup_$TIMESTAMP.tar.gz"
-    FILES_TO_ARCHIVE=()
-
-    echo "Starting archiving process to reduce directory size..."
-
-    INITIAL_SIZE=$SIZE_MB
-
-    while [ $SIZE_MB -gt $ARCHIVE_TRIGGER ]; do
-        # Find the oldest file
-        OLDEST_FILE=$(find "$FULL_DIRECTORY" -maxdepth 1 -type f -not -path "*/$BACKUP/*" -printf '%T@ %p\n' 2>/dev/null | sort -n | head -n 1 | cut -d' ' -f2-)
+    echo "WARNING: Usage exceeds $N% limit! Calculating files to archive..."
+    
+    space_to_free=$((SIZE_MB - ARCHIVE_TRIGGER))
+    echo "Need to free approximately $space_to_free MB"
+    
+    file_list=$(mktemp)
+    find "$FULL_DIRECTORY" -maxdepth 4 -type f -not -path "$BACKUP_DIR/*" -printf '%T@ %s %p\0' 2>/dev/null | \
+    sort -zn > "$file_list"
+    
+    if [ ! -s "$file_list" ]; then
+        echo "No files found to archive."
+        rm -f "$file_list"
+        exit 0
+    fi
+    
+    files_to_archive=$(mktemp)
+    current_freed=0
+    file_count=0
+    
+    while IFS= read -r -d '' line; do
+        file_timestamp=$(echo "$line" | cut -d' ' -f1)
+        file_size=$(echo "$line" | cut -d' ' -f2)
+        file_path=$(echo "$line" | cut -d' ' -f3-)
         
-        if [ -z "$OLDEST_FILE" ]; then
-            echo "No more files found to archive"
+        file_size_mb=$((file_size / 1024 / 1024))
+        
+        if [ $current_freed -lt $space_to_free ] || [ $file_count -eq 0 ]; then
+            echo -n -e "$file_path\0" >> "$files_to_archive"
+            current_freed=$((current_freed + file_size_mb))
+            file_count=$((file_count + 1))
+        else
             break
         fi
-
-        if [ ! -f "$OLDEST_FILE" ]; then
-            continue
-        fi
-        
-        FILES_TO_ARCHIVE+=("$OLDEST_FILE")
-        echo "Adding to archive: $(basename "$OLDEST_FILE")"
-        
-        # Recalculate size after adding this file to archive list
-        SIZE_MB=$(du -sm "$FULL_DIRECTORY" | cut -f1)
-        
-        # If we've collected some files or size is still over limit, create archive
-        if [ ${#FILES_TO_ARCHIVE[@]} -ge 5 ] || [ $SIZE_MB -le $ARCHIVE_TRIGGER ]; then
-            if [ ${#FILES_TO_ARCHIVE[@]} -gt 0 ]; then
-                echo "Creating archive with ${#FILES_TO_ARCHIVE[@]} files..."
-            
-                cd "$FULL_DIRECTORY" && tar -czf "$ARCHIVE_NAME" "${FILES_TO_ARCHIVE[@]##*/}" 2>/dev/null
-                cd - > /dev/null
-            
-                echo "Removing archived files..."
-                rm -rf "${FILES_TO_ARCHIVE[@]}"
-            
-                ARCHIVED_COUNT=$((ARCHIVED_COUNT + ${#FILES_TO_ARCHIVE[@]}))
-                FILES_TO_ARCHIVE=()
-            
-                sync
-                SIZE_MB=$(du -sm "$FULL_DIRECTORY" 2>/dev/null | tail -1 | cut -f1)
-            
-                echo "Current size after archiving: ${SIZE_MB}MB"
-            
-                # Update archive name for next batch
-                TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-                ARCHIVE_NAME="$BACKUP_DIR/logs_backup_$TIMESTAMP.tar.gz"
-            fi
-        fi
-    done
-    #--------------------------------------------------------------------
-
-    if [ ${#FILES_TO_ARCHIVE[@]} -gt 0 ]; then
-        echo "Creating final archive with ${#FILES_TO_ARCHIVE[@]} files..."
-        tar -czf "$ARCHIVE_NAME" "${FILES_TO_ARCHIVE[@]}"
-        echo "Removing archived files..."
-        rm -rf "${FILES_TO_ARCHIVE[@]}"
-        ARCHIVED_COUNT=$((ARCHIVED_COUNT + ${#FILES_TO_ARCHIVE[@]}))
+    done < "$file_list"
+    
+    rm -f "$file_list"
+    
+    if [ $file_count -eq 0 ]; then
+        echo "No files selected for archiving."
+        rm -f "$files_to_archive"
+        exit 0
     fi
-
-    echo "Archiving completed: $ARCHIVED_COUNT files archived"
+    
+    echo "Selected $file_count files to archive (~$current_freed MB)"
+    
+    if answer "Show files that will be archived?"; then
+        echo "Files to be archived:"
+        while IFS= read -r -d '' file; do
+            if [ -n "$file" ]; then
+                echo "  $file"
+            fi
+        done < "$files_to_archive"
+    fi
+    
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    archive_name="${BACKUP_DIR}/backup_${timestamp}.tar.gz"
+    
+    echo "Creating archive: $archive_name"
+    
+    if tar -czf "$archive_name" --null -T "$files_to_archive" 2>/dev/null; then
+        archive_size=$(du -h "$archive_name" | cut -f1)
+        echo "Archive created successfully: $archive_name"
+        echo "Archive size: $archive_size"
+        
+        echo "Removing original files..."
+        removed_count=0
+        while IFS= read -r -d '' file; do
+            if [ -n "$file" ] && [ -f "$file" ]; then
+                if rm -f "$file"; then
+                    removed_count=$((removed_count + 1))
+                else
+                    echo "Warning: Could not remove $file"
+                fi
+            fi
+        done < "$files_to_archive"
+        
+        echo "Original files removed: $removed_count files"
+        
+        new_size=$(du -sm "$FULL_DIRECTORY" 2>/dev/null | tail -1 | cut -f1)
+        new_ratio=$((new_size * 100 / LIMIT_MB))
+        
+        echo "Archiving completed:"
+        echo "- Original size: $SIZE_MB MB"
+        echo "- New size: $new_size MB"
+        echo "- New fill ratio: $new_ratio%"
+        echo "- Files archived: $file_count"
+        echo "- Approximate space freed: $current_freed MB"
+        
+        if [ $new_size -le $ARCHIVE_TRIGGER ]; then
+            echo "SUCCESS: Directory size is now below archive threshold!"
+        else
+            echo "WARNING: Directory size still exceeds threshold. Consider running script again."
+        fi
+        
+    else
+        echo "Error creating archive!"
+        rm -f "$files_to_archive"
+        exit 1
+    fi
+    
+    rm -f "$files_to_archive"
+    
 else
     echo "Archiving cancelled."
     exit 0
 fi
 
 # Apply hard limit after archiving
-if answer "Apply HARD folder size restriction of ${LIMIT}MB?"; then
+if answer "Apply HARD folder size restriction of ${LIMIT_INPUT}?"; then
     echo "Applying HARD folder size restriction..."
-    SIZE_MB=$(du -sm "$FULL_DIRECTORY" | cut -f1)
-
+    
     # Create loop directory
-    echo "Creating loop device with hard limit of ${LIMIT}MB..."
+    echo "Creating loop device with hard limit of ${LIMIT_INPUT}..."
     LOOP_FILE="/limited_${DIRECTORY##*/}.img"
     
     # Check if loop file already exists
@@ -300,7 +353,7 @@ if answer "Apply HARD folder size restriction of ${LIMIT}MB?"; then
         fi
     fi
     
-    sudo dd if=/dev/zero of="$LOOP_FILE" bs=1M count=$LIMIT 2>/dev/null
+    sudo dd if=/dev/zero of="$LOOP_FILE" bs=1M count=$LIMIT_MB 2>/dev/null
     sudo mkfs.ext4 -q "$LOOP_FILE"
 
     # Backup current content
@@ -323,15 +376,15 @@ if answer "Apply HARD folder size restriction of ${LIMIT}MB?"; then
     fi
 
     NEW_SIZE_MB=$(du -sm "$FULL_DIRECTORY" | cut -f1)
-    NEW_PERCENTAGE=$((NEW_SIZE_MB * 100 / LIMIT))
-    FREED_SPACE=$((INITIAL_SIZE - NEW_SIZE_MB))
+    NEW_PERCENTAGE=$((NEW_SIZE_MB * 100 / LIMIT_MB))
+    FREED_SPACE=$((SIZE_MB - NEW_SIZE_MB))
 
     echo "=== Results ==="
-    echo "Files archived: $ARCHIVED_COUNT"
+    echo "Files archived: $file_count"
     echo "New size: ${NEW_SIZE_MB}MB"
     echo "New percentage: ${NEW_PERCENTAGE}%"
     echo "Freed space: ${FREED_SPACE}MB"
-    echo "Folder now has HARD limit of ${LIMIT}MB - impossible to exceed!"
+    echo "Folder now has HARD limit of ${LIMIT_INPUT} - impossible to exceed!"
 else
     echo "Hard limit setup cancelled."
 fi
