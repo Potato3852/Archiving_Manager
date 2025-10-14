@@ -138,7 +138,7 @@ else
     exit 1
 fi
 
-BACKUP="backup"
+BACKUP_DIR="$(dirname "$(realpath "$DIRECTORY")")/$(basename "$DIRECTORY")_backups"
 
 FULL_DIRECTORY=$(realpath "$DIRECTORY")
 
@@ -175,12 +175,12 @@ if [ $SIZE_MB -le $ARCHIVE_TRIGGER ]; then
             
         if mountpoint -q "$FULL_DIRECTORY"; then
             echo "Directory is already mounted, unmounting..."
-            sudo umount "$FULL_DIRECTORY"
+            umount "$FULL_DIRECTORY"
         fi
          
         if [ -f "$LOOP_FILE" ]; then
             if answer "Loop file $LOOP_FILE already exists. Overwrite?"; then
-                sudo rm -f "$LOOP_FILE"
+                rm -f "$LOOP_FILE"
             else
                 echo "Operation cancelled."
                 exit 0
@@ -188,23 +188,23 @@ if [ $SIZE_MB -le $ARCHIVE_TRIGGER ]; then
         fi
         
         # Create loop device with exact size limit
-        sudo dd if=/dev/zero of="$LOOP_FILE" bs=1M count=$LIMIT_MB 2>/dev/null
-        sudo mkfs.ext4 -q "$LOOP_FILE"
+        dd if=/dev/zero of="$LOOP_FILE" bs=1M count=$LIMIT_MB 2>/dev/null
+        mkfs.ext4 -q "$LOOP_FILE"
        
         TEMP_BACKUP=$(mktemp -d)
         cp -r "$FULL_DIRECTORY"/* "$TEMP_BACKUP/" 2>/dev/null
         
-        sudo rm -rf "$FULL_DIRECTORY"/*
+        rm -rf "$FULL_DIRECTORY"/*
         
-        sudo mount -o loop "$LOOP_FILE" "$FULL_DIRECTORY"
-        sudo chown $(whoami):$(whoami) "$FULL_DIRECTORY"
+	mount -o loop,uid=$(id -u),gid=$(id -g) "$LOOP_FILE" "$FULL_DIRECTORY"
+        chown $(whoami):$(whoami) "$FULL_DIRECTORY"
         
         # Restore content
         cp -r "$TEMP_BACKUP/"* "$FULL_DIRECTORY/" 2>/dev/null
         rm -rf "$TEMP_BACKUP"
         
         if answer "Add to /etc/fstab for automatic mounting?"; then
-            echo "$LOOP_FILE $FULL_DIRECTORY ext4 loop,defaults 0 0" | sudo tee -a /etc/fstab
+            echo "$LOOP_FILE $FULL_DIRECTORY ext4 loop,defaults 0 0" | tee -a /etc/fstab
         fi
         
         echo "Folder now has hard limit of ${LIMIT_INPUT}"
@@ -215,12 +215,11 @@ if [ $SIZE_MB -le $ARCHIVE_TRIGGER ]; then
 fi
 #------------------------------------------------------------------------
 
-# Second scenario - need archiving (новая логика)
+# Second scenario - need archiving
 echo "Size exceeds threshold, archiving required"
 
 if answer "Start archiving old files?"; then
     # Create backup directory if it doesn't exist
-    BACKUP_DIR="${FULL_DIRECTORY}/backup"
     mkdir -p "$BACKUP_DIR"
 
     if [ ! -w "$BACKUP_DIR" ]; then
@@ -234,7 +233,7 @@ if answer "Start archiving old files?"; then
     echo "Need to free approximately $space_to_free MB"
     
     file_list=$(mktemp)
-    find "$FULL_DIRECTORY" -maxdepth 4 -type f -not -path "$BACKUP_DIR/*" -printf '%T@ %s %p\0' 2>/dev/null | \
+    find "$FULL_DIRECTORY" -maxdepth 1 -type f -not -path "$BACKUP_DIR/*" -printf '%T@ %s %p\0' 2>/dev/null | \
     sort -zn > "$file_list"
     
     if [ ! -s "$file_list" ]; then
@@ -346,25 +345,25 @@ if answer "Apply HARD folder size restriction of ${LIMIT_INPUT}?"; then
     # Check if loop file already exists
     if [ -f "$LOOP_FILE" ]; then
         if answer "Loop file $LOOP_FILE already exists. Overwrite?"; then
-            sudo rm -f "$LOOP_FILE"
+            rm -f "$LOOP_FILE"
         else
             echo "Operation cancelled."
             exit 0
         fi
     fi
     
-    sudo dd if=/dev/zero of="$LOOP_FILE" bs=1M count=$LIMIT_MB 2>/dev/null
-    sudo mkfs.ext4 -q "$LOOP_FILE"
+    dd if=/dev/zero of="$LOOP_FILE" bs=1M count=$LIMIT_MB 2>/dev/null
+    mkfs.ext4 -q "$LOOP_FILE"
 
     # Backup current content
     TEMP_BACKUP=$(mktemp -d)
     cp -r "$FULL_DIRECTORY"/* "$TEMP_BACKUP/" 2>/dev/null
 
-    sudo rm -rf "$FULL_DIRECTORY"/*
+    rm -rf "$FULL_DIRECTORY"/*
 
     # Mount limited filesystem
-    sudo mount -o loop "$LOOP_FILE" "$FULL_DIRECTORY"
-    sudo chown $(whoami):$(whoami) "$FULL_DIRECTORY"
+    mount -o loop "$LOOP_FILE" "$FULL_DIRECTORY"
+    chown $(whoami):$(whoami) "$FULL_DIRECTORY"
 
     # Restore content
     cp -r "$TEMP_BACKUP/"* "$FULL_DIRECTORY/" 2>/dev/null
@@ -372,7 +371,7 @@ if answer "Apply HARD folder size restriction of ${LIMIT_INPUT}?"; then
 
     # Add to fstab for persistence
     if answer "Add to /etc/fstab for automatic mounting?"; then
-        echo "$LOOP_FILE $FULL_DIRECTORY ext4 loop,defaults 0 0" | sudo tee -a /etc/fstab
+        echo "$LOOP_FILE $FULL_DIRECTORY ext4 loop,defaults 0 0" | tee -a /etc/fstab
     fi
 
     NEW_SIZE_MB=$(du -sm "$FULL_DIRECTORY" | cut -f1)
